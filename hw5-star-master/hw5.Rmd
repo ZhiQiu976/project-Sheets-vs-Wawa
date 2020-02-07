@@ -1,0 +1,191 @@
+---
+title: "Homework 5"
+author: "Zhi Qiu, Yiping Song, Yihang Xin, Jiajun Song"
+date: "9/26/2019"
+output:
+  rmdformats::readthedown:
+    theme: sandstone
+    highlight: tango
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup, include = FALSE}
+library(knitr)
+options(max.print="75")
+knitr::opts_chunk$set(prompt=FALSE, tidy=TRUE, comment=NA,
+                      warning=FALSE, message=FALSE)
+opts_knit$set(width=75)
+```
+
+
+## Packages
+
+```{r packages}
+library(tidyverse)
+library(ggmap)
+```
+
+
+## Task1
+
+get_wawa.R:
+
+Firstly, we create the base_url without id. Then create a function "query_wawa" to download  the base_url with id using GET() and see if its' status_code in 200:299 to check if it is a vaild store. 
+
+Using "map" and "query_wawa" function  to download "http://www2.stat.duke.edu/~sms185/data/fuel/bystore/awaw/awawstore=[id].json" for iterates id from 00000 up to 01000 and from 08000 up to 09000 and delete the data with length 0 to get the raw_wawa.
+
+
+At last, save the "raw_wawa" data in RDS file "data/wawa/raw_wawa.rds". It will pause expected 2 seconds after each request.
+
+
+parse_wawa.R:
+
+The script use `readRDS` to read RDS file from "data/wawa/raw_wawa.rds".Then create the varnames to extract the unique variable names. Next use a function to extract the corresponding content of the varnames from "raw_wawa", storeNumber, addresses and latitude, longitude. Then include them into a data frame "wawa". Finally it will save  "wawa" in RDS file "data/wawa/wawa.rds".
+
+
+## Task2
+
+
+get_sheetz.R:
+
+Firstly, getting url of each section through css and attributes and then select first 10 .
+
+Then use  "func.parse " and map function to read the html file from each url and construct a dataframe. The nested "storeAttribute" column is replaced by three new columns to extract the store attributes information. The nested "fuelPrice" column is deleted as this part of information could be viewed as redundant in this project.
+
+Next save "raw_sheetz" data frame in RDS file "data/sheetz/raw_sheetz.rds". It will pause expected 5 seconds after each request.
+
+
+parse_sheetz.R:
+
+The script use read_RDS to read RDS file from "data/sheetz/raw_sheetz.rds" and name it as "sheetz.df". Then extract all the information about geographic location (the first 9 columns) and save it to the dataframe made especially for task 3 - "sheetz.t3". Finally it will save "sheetz.t3" in "data/sheetz/sheetz.rds".
+
+
+## Task3
+
+### Import Data
+
+```{r data}
+wawa <- readRDS("data/wawa/wawa.rds")
+wawa.t3 <- wawa %>%
+  select(storeNumber, city, state, longitude, latitude) %>%
+  filter(state == "PA") %>%
+  mutate(store = "Wawa")
+
+sheetz <- readRDS("data/sheetz/sheetz.rds")
+sheetz.t3 <- sheetz %>%
+  select(storeNumber, city, state, longitude, latitude) %>%
+  mutate(store = "Sheetz")
+```
+
+
+### General Picture
+
+```{r general picture}
+qmplot(longitude, latitude,
+       data = rbind(wawa.t3,sheetz.t3), maptype = "toner-lite",
+       color = store, extent = "panel") + 
+  guides(size = FALSE) +
+  labs(title = "General Picture",
+       caption = "zoom  = 8")
+```
+
+Firstly, plot the wawa and sheetz stores on map using “qmplot” to see if there is some overlap of these two kind of stores.
+
+From the first plot , we see that two areas are not completely separable and there may have rival fuel stations inside each station's "region".
+
+
+### Focus on City
+
+```{r city}
+city.wawa <- wawa.t3 %>% 
+  filter(state == "PA") %>% 
+  group_by(city) %>% 
+  count() %>% 
+  mutate(store = "wawa")
+city.sheetz <- sheetz.t3 %>%
+  group_by(city) %>% 
+  count() %>% 
+  mutate(store = "sheetz")
+city.df <- rbind(city.wawa[which(city.wawa$city %in% city.sheetz$city),],
+              city.sheetz[which(city.sheetz$city %in% city.wawa$city),])
+#plot
+ggplot(data=city.df, aes(x=city, y=n, fill=store)) +
+  geom_bar(stat="identity", position=position_dodge())+
+  scale_fill_brewer(palette="Paired")+
+  theme_minimal() +
+  labs(title = "Stores in the same city") +
+  ylab("number of stores")
+```
+
+Then we filter the data frame of wawa and sheetz to focus on the cities that may have overlap. Using ggplot to draw the number of two kind stores in these cities.
+
+
+### Overlapped store regions
+
+```{r}
+#narrowed dfs
+city.sheetz2 <- sheetz.t3 %>% 
+  filter(city %in% city.df$city) %>% 
+  select(city, latitude, longitude) %>% 
+  mutate(store = "sheetz")
+city.wawa2 <- wawa.t3 %>% 
+  filter(city %in% city.df$city) %>% 
+  select(city, latitude, longitude) %>% 
+  mutate(store = "wawa")
+city.df2 <- rbind(city.wawa2, city.sheetz2) %>%
+  arrange(city)
+```
+
+
+```{r}
+qmplot(longitude, latitude, data = city.df2, maptype = "toner-lite",
+       color = store, alpha = 0.5, size = 0.05, extent = "panel") + 
+  guides(size=FALSE, alpha = FALSE) +
+  labs(title = "Overlapped Store Regions",
+       caption = "zoom = 10")
+
+#  Map tiles by Stamen Design, under CC BY 3.0. Data by OpenStreetMap, under ODbL.
+```
+
+From the graph above we can see that it is reasonable to focus on city. We can possibly see the converge line for the two rival fuel stations.
+
+Next we take a closer look on each six cities that has overlapped rival stations. Note that each graph below has the same zoom to make sure that distance unit are the same among graphs.
+
+
+### Close up on the Six Cities
+
+```{r message=FALSE, warning=FALSE}
+# Citation:
+#   D. Kahle and H. Wickham. ggmap: Spatial Visualization with
+#   ggplot2. The R Journal, 5(1), 144-161. URL
+#   http://journal.r-project.org/archive/2013-1/kahle-wickham.pdf
+
+# Google Map Key
+register_google(key = "AIzaSyB8sm60WJE-cmApe_WiIUtrLtmBOaYFYJ4")
+
+city.df3 <- group_split(city.df2 %>% group_by(city))
+
+plot.by.city <- function(x) {
+  name = tolower(x$city[1])
+  lat = mean(unlist(x[, 2])); lon = mean(unlist(x[, 3]))
+  maplayer <- get_map(location = c(lat=lat,lon=lon),
+                      maptype = "roadmap", source = "google",
+                      zoom = 12)
+  
+  ggmap(maplayer) +
+    geom_point(aes(x = longitude, y = latitude, colour = store),
+               size = 20, alpha = 0.2,
+               data = x) +
+    guides(colour = FALSE) +
+    labs(x = "longitude", y = "latitude",
+         title = paste("Stores in", x$city[1]),
+         caption = "zoom = 12")
+}
+
+map(city.df3, plot.by.city)
+```
+
+Finally, we take a closer look on each six cities that have both stores. We can see from the roadmap that Wawa and Sheetz do have rival relationships in those regions. Also we add a possible radiation range store to make things clearer and all the scalebar of the six graphs is fixed, with zoom = 12.
+
